@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM configuration
+
+Parameters:
+  AppStackName:
+    Default: sample-serverless-app
+    Description: Stack name for the application deployment
+    Type: String
+
+Resources:
+  DeploymentGroup:
+    Type: AWS::IAM::Group
+
+  DeploymentUser:
+    Type: AWS::IAM::User
+    Properties:
+      Groups:
+        - !Ref DeploymentGroup
+
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Assumed role for the application deployment
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'sts:AssumeRole'
+              - 'sts:TagSession'
+
+  AssumeRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      Description: Grants permissions to assume deployment role
+      Groups:
+        - !Ref DeploymentGroup
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sts:AssumeRole'
+              - 'sts:TagSession'
+            Resource:
+              - !GetAtt DeploymentRole.Arn
+
+  DeploymentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      Description: Permissions policy to deploy the application stack
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: S3BucketsAndDeploymentArtifactsManagedBySam
+            Effect: Allow
+            Action:
+              - 's3:ListBucket'
+              - 's3:GetBucketLocation'
+              - 's3:PutObject'
+              - 's3:GetObject'
+              - 's3:DeleteObject'
+            Resource:
+              - 'arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*'
+              - 'arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*/*'
+          - Sid: CloudFormationPermissionsByStackName
+            Effect: Allow
+            Action:
+              - 'cloudformation:*'
+            Resource:
+              - 'arn:aws:cloudformation:*:aws:transform/Serverless-2016-10-31'
+              - !Sub 'arn:aws:cloudformation:*:*:stack/${AppStackName}'
+              - !Sub 'arn:aws:cloudformation:*:*:stack/${AppStackName}/*'
+          - Sid: AimRolesPrefixedByStackName
+            Effect: Allow
+            Action:
+              - 'iam:GetRole'
+              - 'iam:CreateRole'
+              - 'iam:PassRole'
+              - 'iam:DeleteRole'
+              - 'iam:GetRolePolicy'
+              - 'iam:PutRolePolicy'
+              - 'iam:AttachRolePolicy'
+              - 'iam:DetachRolePolicy'
+              - 'iam:DeleteRolePolicy'
+              - 'iam:TagRole'
+              - 'iam:UntagRole'
+            Resource:
+              - !Sub 'arn:aws:iam::*:role/${AppStackName}-*'
+          - Sid: EventRulesPrefixedByStackName
+            Effect: Allow
+            Action:
+              - 'events:*'
+            Resource:
+              - !Sub 'arn:aws:events:*:*:rule/${AppStackName}-*'
+          - Sid: LambdaFunctionsPrefixedByStackName
+            Effect: Allow
+            Action:
+              - 'lambda:*'
+            Resource:
+              - !Sub 'arn:aws:lambda:*:*:function:${AppStackName}-*'
+          - Sid: CantFigureHowtoLimitApiGatewayResources
+            Effect: Allow
+            Action:
+              - 'apigateway:*'
+            Resource: 'arn:aws:apigateway:*::/*'
+          - Sid: SnsPrefixedByStackName
+            Effect: Allow
+            Action:
+              - 'sns:*'
+            Resource:
+              - !Sub 'arn:aws:sns:*:*:${AppStackName}-*'
+          - Sid: DynamoDbPrefixedByStackName
+            Effect: Allow
+            Action:
+              - 'dynamodb:*'
+            Resource:
+              - !Sub 'arn:aws:dynamodb:*:*:table/${AppStackName}-*'
+
+Outputs:
+  AppStackName:
+    Description: Stack name for the application deployment
+    Value: !Ref AppStackName
+  DeploymentUserName:
+    Description: The name of a user account created for deployment pipelines
+    Value: !Ref DeploymentUser
+  RoleToAssume:
+    Description: The name of a role to assume in deployment pipelines
+    Value: !Ref DeploymentRole

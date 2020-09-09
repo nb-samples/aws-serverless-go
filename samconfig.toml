@@ -1,0 +1,9 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "sample-serverless-app"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-{AWS_SAM_S3_HASH}"
+s3_prefix = "sample-serverless-app"
+region = "{AWS_REGION}"
+capabilities = "CAPABILITY_IAM"

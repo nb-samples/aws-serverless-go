@@ -1,0 +1,140 @@
+name: deployment
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - master
+  #   paths-ignore:
+  #     - '**.md'
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    if: "! (contains(github.event.head_commit.message, '[skip ci]') || contains(github.event.head_commit.message, '[skip-ci]'))"
+    steps:
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.15
+
+    - name: Cache Go modules
+      id: cache
+      uses: actions/cache@v2
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Get dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: make deps
+
+    - name: Build
+      run: make build
+
+    - name: Unit tests
+      run: make test
+
+    - name: Continuous delivery check
+      id: check-cd
+      if: "! (contains(github.event.head_commit.message, '[skip cd]') || contains(github.event.head_commit.message, '[skip-cd]'))"
+      run: echo 'Continuous delivery is enabled'
+
+    # this step is only required for "shared" config
+    - name: Substitute replacement variables in samconfig.toml
+      run: make toml
+      env:
+        AWS_SAM_S3_HASH: ${{ secrets.AWS_SAM_S3_HASH }}
+        AWS_REGION: ${{ env.AWS_REGION }}
+
+    - name: Upload config
+      uses: actions/upload-artifact@v2
+      if: steps.check-cd.outcome == 'success'
+      with:
+        name: config
+        path: |
+          *.??ml
+          LICENSE
+          Makefile
+          README.md
+
+    - name: Upload build binaries
+      if: steps.check-cd.outcome == 'success'
+      uses: actions/upload-artifact@v2
+      with:
+        name: build
+        path: .aws-sam/build/
+
+    outputs:
+      skip-cd: ${{ steps.check-cd.outcome != 'success' }}
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: needs.build.outputs.skip-cd != 'true'
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Start deployment
+      uses: bobheadxi/deployments@master
+      id: deployment
+      with:
+        step: start
+        env: production
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Download deployment config
+      uses: actions/download-artifact@v2
+      with:
+        name: config
+        path: .
+
+    - name: Download deployment binaries
+      uses: actions/download-artifact@v2
+      with:
+        name: build
+        path: .aws-sam/build/
+  
+    - name: Fix permissions
+      run: chmod -R 755 .aws-sam/build
+
+    - name: Display directory structure
+      run: ls -l -R . .aws-sam/build/
+      working-directory: .
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-region: ${{ env.AWS_REGION }}
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        role-duration-seconds: 900
+
+    - name: Test AWS credentials
+      run: |
+        aws sts get-caller-identity --query Arn | grep ":assumed-role/" > /dev/null
+
+    - name: Deploy
+      run: make deploy
+
+    - name: Update deployment status
+      uses: bobheadxi/deployments@master
+      if: always()
+      with:
+        step: finish
+        env: production
+        status: ${{ job.status }}
+        deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+        token: ${{ secrets.GITHUB_TOKEN }}

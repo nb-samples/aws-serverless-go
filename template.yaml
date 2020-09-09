@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Sample serverless app with Go
+Globals:
+  Api:
+    OpenApiVersion: 3.0.1
+    Auth:
+      ApiKeyRequired: false
+  Function:
+    Runtime: go1.x
+    Timeout: 5
+
+Resources:
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: poc
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: SHARED
+          Description: Shared plan to enable API key
+      Models:
+        Item:
+          type: object
+          description: The sample item schema
+          properties:
+            id:
+              type: string
+              description: The item unique identifier
+            name:
+              type: string
+              description: The item mane
+            createdAt:
+              type: string
+              format: date-time
+              description: The item create date/time
+            updatedAt:
+              type: string
+              format: date-time
+              description: The item update date/time
+            details:
+              type: object
+              description: The item details
+              properties:
+                description:
+                  type: string
+                  description: The item description
+                location:
+                  type: string
+                  description: The item location
+                quantity:
+                  type: integer
+                  description: The item quantity
+
+  SampleSvc:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Sample API service function
+      CodeUri: cmd/api
+      Handler: api
+      Events:
+        CreateItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /items
+            Method: POST
+            RequestModel:
+              Model: Item
+              Required: true
+        GetItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /items/{itemId}
+            Method: GET
+        DeleteItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /items/{itemId}
+            Method: DELETE
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt SnsTopic.TopicName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DbTable
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref SnsTopic
+          DB_TABLE_NAME: !Ref DbTable
+
+  SnsTopic:
+    Type: AWS::SNS::Topic
+
+  DbTable:
+    Type: AWS::Serverless::SimpleTable
+
+Outputs:
+  Endpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/poc"
+
+  Table:
+    Description: DynamoDB table name
+    Value: !Ref DbTable
+
+  Topic:
+    Description: SNS topic
+    Value: !Ref SnsTopic
